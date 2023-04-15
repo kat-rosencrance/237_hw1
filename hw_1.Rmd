@@ -1,0 +1,70 @@
+---
+title: "hw1"
+author: "Katherine Rosencrance"
+date: "2023-04-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(lubridate)
+library(here)
+library(tidyverse)
+
+```
+
+```{r}
+clim <- read_csv(here("3303563.csv")) %>% 
+  select(DATE, PRCP, TMAX,TMIN)
+
+date=as.Date(clim$DATE, format = "%m/%d/%Y")
+date
+```
+
+```{r dailyplots, echo=TRUE}
+
+ggplot(clim, aes(date, TMAX))+geom_line()+ labs(y="Daily Maximum Temperature (degrees F)", x="Date")
+
+ggplot(clim, aes(date, TMIN))+geom_line()+ labs(y="Daily Minimum Temperature (degrees F)", x="Date")
+
+ggplot(clim, aes(date, PRCP))+geom_line()+ labs(y="Daily Rainfall (in)", x="Date")
+
+```
+
+```{r dailyplots.filled, echo=TRUE}
+
+# find the row with missing data
+fillrow = which(is.na(clim$PRCP))
+# display the rows to see how many there are
+fillrow
+
+# fill in data in the missing rows with zeros
+clim$PRCP[fillrow]=0
+# replot to make sure it works
+ggplot(clim, aes(date, PRCP))+geom_line()+ labs(y="Daily rainfall (mm)", x="Date")
+
+
+# find rows with missing data
+# temperature: values are either NA or not reasonable for that location (here, below 40F)
+fillrow = which(is.na(clim$TMAX))
+fillrow = fillrow[2:length(fillrow)]
+clim$TMAX[fillrow]=(clim$TMAX[fillrow+1]+clim$TMAX[fillrow-1])/2
+ggplot(clim, aes(date, clim$TMAX))+geom_line()+ labs(y="Daily Maximum Temperature (degrees F)", x="Date")
+
+```
+
+```{r annual, echo=TRUE}
+
+clim.mwy = clim %>% group_by(year(date)) %>% summarize(tmax=mean(TMAX), tmin=mean(TMIN), precip=sum(PRCP))
+clim.mwy$dt = unique(year(date))
+
+ggplot(clim.mwy, aes(x=dt, tmax))+geom_point(col="red")+
+  scale_y_continuous(limits=c(min(clim.mwy$tmin), max(clim.mwy$tmax)))+
+geom_point(data=clim.mwy, aes(x=dt, tmin), col="blue")
+
+a = ggplot(clim.mwy, aes(x=dt, tmax))+geom_point(col="red")+
+  scale_y_continuous(limits=c(min(clim.mwy$tmin), max(clim.mwy$tmax)))+
+geom_point(data=clim.mwy, aes(x=dt, tmin), col="blue")
+
+```
