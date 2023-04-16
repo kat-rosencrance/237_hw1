@@ -18,8 +18,7 @@ library(tidyverse)
 clim <- read_csv(here("3303563.csv")) %>% 
   select(DATE, PRCP, TMAX,TMIN)
 
-date=as.Date(clim$DATE, format = "%m/%d/%Y")
-date
+clim$DATE=as.Date(clim$DATE, format = "%m/%d/%Y")
 ```
 
 ```{r dailyplots, echo=TRUE}
@@ -41,19 +40,20 @@ fillrow
 
 # fill in data in the missing rows with zeros
 clim$PRCP[fillrow]=0
+fillrow
 # replot to make sure it works
 ggplot(clim, aes(date, PRCP))+geom_line()+ labs(y="Daily rainfall (mm)", x="Date")
 
-
+# temperature: values are either NA or not reasonable for that location (here, below 40F)
 # find rows with missing data
 # temperature: values are either NA or not reasonable for that location (here, below 40F)
 fillrow = which(is.na(clim$TMAX))
 fillrow = fillrow[2:length(fillrow)]
 clim$TMAX[fillrow]=(clim$TMAX[fillrow+1]+clim$TMAX[fillrow-1])/2
 ggplot(clim, aes(date, clim$TMAX))+geom_line()+ labs(y="Daily Maximum Temperature (degrees F)", x="Date")
-
 ```
 
+So here let's try doing some aggregation to reduce the noise. As a simple example, we can try annual averages.
 ```{r annual, echo=TRUE}
 
 clim.mwy = clim %>% group_by(year(date)) %>% summarize(tmax=mean(TMAX), tmin=mean(TMIN), precip=sum(PRCP))
@@ -66,5 +66,23 @@ geom_point(data=clim.mwy, aes(x=dt, tmin), col="blue")
 a = ggplot(clim.mwy, aes(x=dt, tmax))+geom_point(col="red")+
   scale_y_continuous(limits=c(min(clim.mwy$tmin), max(clim.mwy$tmax)))+
 geom_point(data=clim.mwy, aes(x=dt, tmin), col="blue")
+a
+```
 
+```{r wy, echo=TRUE}
+
+# now lets add a trend line
+a =a+stat_smooth(method="lm", col="red")
+a
+a+ stat_smooth(data=clim.mwy, aes(x=dt,tmin), col="blue", method="lm")
+
+```
+
+```{r regressionline, echo=TRUE}
+
+
+res=lm(tmin~dt, data=clim.mwy)
+summary(res)
+confint(res,"dt", level=0.95)
+ggplot(clim.mwy, aes(x=dt, y=tmin)) + stat_summary(fun.y="mean", geom="point", col="red", size=2)+theme(axis.text=element_text(size=14, face="bold"), axis.title=element_text(size=14, face="bold")) + geom_smooth(method="lm")
 ```

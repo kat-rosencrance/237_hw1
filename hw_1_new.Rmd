@@ -1,0 +1,208 @@
+---
+title: "hw_1_kr"
+author: "Katherine Rosencrance"
+date: "2023-04-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(here)
+library(tidyverse)
+library(janitor)
+library(lubridate)
+library(tsibble)
+library(feasts)
+library(gghighlight)
+library(plotly)
+library(Kendall)
+library(kableExtra)
+library(broom)
+library(cowplot)
+```
+
+#read and clean data
+```{r}
+swb <- read_csv(here("3303563.csv")) %>% 
+  clean_names() %>% 
+  select(-station, -name, -snow, -snwd, -tavg) %>% 
+  mutate(date = mdy(date)) %>% 
+  mutate(month = month(date, label = TRUE)) %>% 
+  mutate(year = year(date)) %>% 
+  drop_na(tmax, tmin, prcp)
+```
+
+## Climate Averages
+```{r}
+# converting the dataframe to a time series
+swb_ts <- swb %>% 
+  as_tsibble(key = NULL, index = date) 
+
+# monthly summary statistics
+swb_monthly <- swb_ts %>% 
+  index_by(year_month = ~yearmonth(.)) %>% 
+  summarize(mean_daily_max_temp = mean(tmax, na.rm = TRUE), 
+            mean_daily_min_temp = mean(tmin, na.rm = TRUE), 
+            mean_daily_precip = mean(prcp, na.rm = TRUE), 
+            max_temp_monthly = max(tmax, na.rm = TRUE), 
+            min_temp_monthly = min(tmin, na.rm = TRUE),
+            monthly_precip = sum(prcp, na.rm = TRUE)) %>% 
+  mutate(year = year(year_month))
+
+# yearly summary statistics
+swb_yearly <- swb_ts %>% 
+  index_by(year) %>% 
+  summarize(mean_daily_max_temp = mean(tmax, na.rm = TRUE), 
+            mean_daily_min_temp = mean(tmin, na.rm = TRUE), 
+            mean_daily_precip = mean(prcp, na.rm = TRUE),
+            total_yearly_precip = sum(prcp)) %>% 
+   filter(year != "2023")
+
+# hottest 10 years on record
+swb_hottest <- swb_yearly %>% 
+  slice_max(n = 10, order_by = mean_daily_max_temp)
+
+```
+
+## Temp Average with Linear Model
+```{r}
+# yearly ggplot
+ggplot(data = swb_yearly) +
+  geom_smooth(method = "lm", 
+              color = "black", 
+              aes(x = year, 
+                  y = mean_daily_max_temp)) +
+  geom_smooth(method = "lm",
+              color = "black", 
+              aes(x = year, 
+                  y = mean_daily_min_temp)) +
+geom_point(aes(x = year, 
+               y = mean_daily_max_temp, 
+               color = mean_daily_max_temp), 
+           size = 2) +
+  geom_point(aes(x = year, 
+                 y = mean_daily_min_temp, 
+                 color = mean_daily_min_temp), 
+             size = 2) +
+  scale_color_gradientn(colors = c("blue", "red")) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = element_blank(), 
+       y = "Average Daily Temperature (F)",
+       title = "Average Max and Min Temperature Per Year in Scranton/Wilkes Barre",
+       subtitle = "1952-2022")+
+  geom_text(x = 2010, y = 45, label = paste0("Slope: ", slope_min))+
+  geom_text(x = 2010, y = 65, label = paste0("Slope: ", slope_max))
+
+# extract the slope of the linear regression line
+slope_max <- round(coef(summary(lm(mean_daily_max_temp ~ year, data = swb_yearly)))[2,1], 2)
+slope_min <- round(coef(summary(lm(mean_daily_min_temp ~ year, data = swb_yearly)))[2,1], 2)
+
+# Mann Kendall testing for significance
+mk_max <- MannKendall(swb_yearly$mean_daily_max_temp)
+# tau = 0.351
+
+mk_min <- MannKendall(swb_yearly$mean_daily_min_temp)
+# tau = 0.313
+
+```
+
+## Precip average two time periods, first 18 years and last 18 years of dataset
+```{r}
+swb_subset1 <- swb_yearly %>% 
+  filter(year >=1952& year <=1970)
+swb_subset2 <- swb_yearly %>% 
+  filter(year >= 2004 & year <= 2022)
+
+# Plot the subsetted dataset
+plot1<- ggplot(data = swb_subset1, aes(x = year, y = mean_daily_precip)) +
+  geom_smooth(method = "lm", color = "black") +
+  geom_point(color = "blue") +
+  theme_minimal() +
+  labs(x = element_blank(), y = "Mean Daily Precipitation (inches)",
+       title = "Mean Daily Precipitation Per Year in Scranton/Wilkes Barre",
+       subtitle = "1952-1970")+
+   geom_text(x = 1960, y = 0.085, label = paste0("Slope: ", slope_1))
+
+plot2<- ggplot(data = swb_subset2, aes(x = year, y = mean_daily_precip)) +
+  geom_smooth(method = "lm", color = "black") +
+  geom_point(color = "blue") +
+  theme_minimal() +
+  labs(x = element_blank(), y = "Mean Daily Precipitation (inches)",
+       title = "Mean Daily Precipitation Per Year in Scranton/Wilkes Barre",
+       subtitle = "2004-2022")+
+   geom_text(x = 2012, y = 0.125, label = paste0("Slope: ", slope_2))
+
+#extract slopes
+slope_1 <- round(coef(summary(lm(mean_daily_precip ~ year, data = swb_subset1)))[2,1], 5)
+slope_2 <- round(coef(summary(lm(mean_daily_precip ~ year, data = swb_subset2)))[2,1], 5)
+plot1
+plot2
+
+#ttest
+ttest<- t.test(swb_subset1$mean_daily_precip, swb_subset2$mean_daily_precip)
+ttest
+# p-value = 0.008848 which is less than 0.05 so there is significant diff between precip of two time periods 95 percent confidence interval
+
+```
+
+## Extreme metrics: freezing days and hot days
+```{r}
+#hot days
+swb_hot_days <- swb_ts %>% 
+  index_by(year) %>% 
+  summarize(days_above_85 = sum(ifelse(tmax >= 85, 1, 0))) %>% 
+  filter(year != "2023")
+
+ggplot(data = swb_hot_days, aes(x = year, y = days_above_85))+
+  geom_col(fill = "red")+
+  labs(x = element_blank(), y = "Number of Days Over 85F Per Year", subtitle = "1952-2022")+
+  theme_minimal()
+
+# days below freezing
+swb_below_freezing <- swb_ts %>% 
+  index_by(year) %>% 
+  summarize(days_below_freezing = sum(ifelse(tmin <= 32, 1, 0))) %>% 
+  filter(year != "2023")
+
+ggplot(data = swb_below_freezing, aes(x = year, y = days_below_freezing))+
+  geom_col(fill = "blue")+
+  labs(x = element_blank(), y = "Number of Days Below Freezing", subtitle = "1952-2022")+
+  theme_minimal()
+
+## freezing days going down, correlates with the increase in temperature
+## days above 85 seem to be going up, also correlates with temp increase
+```
+
+## hottest days of the year
+```{r}
+# hottest day of the year
+swb_hottest_days <- swb_ts %>% 
+  index_by(year) %>% 
+  summarize(hottest_day = max(tmax)) %>% 
+  filter(year != "2023")
+
+# plot
+ggplot(data = swb_hottest_days) +
+  geom_smooth(method = "lm", 
+              color = "black", 
+              aes(x = year, 
+                  y = hottest_day)) +
+geom_point(aes(x = year, 
+               y = hottest_day, 
+               color = hottest_day), 
+           size = 2) +
+  scale_color_gradientn(colors = c("red")) +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(x = element_blank(), 
+       y = "Temperature (F)",
+       title = "Hottest Day of the Year",
+       subtitle = "1952-2022")+
+     geom_text(x = 1985, y = 96, label = paste0("Slope: ", slope_hot))
+  
+  
+slope_hot <- round(coef(summary(lm(hottest_day ~ year, data = swb_hottest_days)))[2,1], 5)
+```
+
